@@ -3,7 +3,6 @@ import os
 import torch
 import torch.nn as nn
 import numpy as np
-import torchtext
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from transformers import BertModel
@@ -90,6 +89,8 @@ class EncoderTextBigru(nn.Module):
         if wemb_type is None or word2idx is None:
             nn.init.xavier_uniform_(self.embed.weight)
         else:
+            import torchtext
+
             cache_dir = os.path.expanduser(cache_dir+wemb_type)
             # Load pretrained word embedding
             if 'fasttext' == wemb_type.lower():

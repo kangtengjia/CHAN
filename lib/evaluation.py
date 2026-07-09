@@ -112,8 +112,9 @@ def encode_data(model, data_loader, log_step=10, logging=logger.info):
             cap_lens = [0] * len(data_loader.dataset)
             img_lens = [0] * len(data_loader.dataset)
         # cache embeddings
-        img_embs[ids] = img_emb.data.cpu().numpy().copy()
-        cap_embs[ids,:max(lengths),:] = cap_emb.data.cpu().numpy().copy()
+        id_array = np.asarray(ids, dtype=np.int64)
+        img_embs[id_array] = img_emb.data.cpu().numpy().copy()
+        cap_embs[id_array,:max(lengths),:] = cap_emb.data.cpu().numpy().copy()
 
         for j, nid in enumerate(ids):
             cap_lens[nid] = lengths[j]
@@ -220,7 +221,9 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False, save_path=Non
 
     if opt.text_enc_type=="bigru":
         # load vocabulary used by the model
-        if 'coco' in opt.data_name:
+        if opt.data_name == 'scanrefer':
+            vocab_file = 'my_data_vocab.json'
+        elif 'coco' in opt.data_name:
             vocab_file = 'coco_precomp_vocab.json'
         else:
             vocab_file = 'f30k_precomp_vocab.json'

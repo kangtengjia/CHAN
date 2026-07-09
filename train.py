@@ -33,7 +33,9 @@ def main():
 
     # Load Vocabulary
     if opt.text_enc_type=="bigru":
-        if 'coco' in opt.data_name:
+        if opt.data_name == 'scanrefer':
+            vocab_file = 'my_data_vocab.json'
+        elif 'coco' in opt.data_name:
             vocab_file = 'coco_precomp_vocab.json'
         else:
             vocab_file = 'f30k_precomp_vocab.json'
@@ -183,7 +185,8 @@ def validate(opt, val_loader, model):
         # compute the encoding for all the validation images and captions
         img_embs, cap_embs, img_lens, cap_lens = encode_data(model, val_loader, opt.log_step, logging.info)
 
-    img_embs = np.array([img_embs[i] for i in range(0, len(img_embs), 5)])
+    cap_per_scene = getattr(val_loader.dataset, 'im_div', 5)
+    img_embs = np.array([img_embs[i] for i in range(0, len(img_embs), cap_per_scene)])
 
     start = time.time()
     # sims = compute_sim(img_embs, cap_embs)

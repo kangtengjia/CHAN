@@ -4,15 +4,56 @@ import torch.utils.data as data
 import os
 import os.path as osp
 import numpy as np
-from imageio import imread
 import random
 import json
-import cv2
 import nltk
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _split_tag(data_split):
+    return 'train' if data_split == 'train' else 'val'
+
+
+def _data_root(opt, data_path):
+    root = getattr(opt, 'data_root', '')
+    return root if isinstance(root, str) and root else data_path
+
+
+def _pc_paths(opt, data_root, split_tag):
+    grid_override = getattr(opt, f'pc_grid_{split_tag}', '')
+    pos_override = getattr(opt, f'pc_pos_{split_tag}', '')
+    if grid_override:
+        grid_path = grid_override
+    elif getattr(opt, 'pc_variant', 'base') == 'base_plus_uni3dinst':
+        k = int(getattr(opt, 'uni3d_inst_k', 20))
+        grid_path = osp.join(data_root, f'pt2vec_200_plus_uni3dinst_k{k}_{split_tag}.npy')
+    else:
+        grid_path = osp.join(data_root, f'pt2vec_200_random_{split_tag}.npy')
+
+    if pos_override:
+        pos_path = pos_override
+    elif getattr(opt, 'pc_variant', 'base') == 'base_plus_uni3dinst':
+        k = int(getattr(opt, 'uni3d_inst_k', 20))
+        pos_path = osp.join(data_root, f'pt2vec_200_plus_uni3dinst_k{k}_pos_{split_tag}.npy')
+    else:
+        pos_path = osp.join(data_root, f'pt2vec_200_random_pos_{split_tag}.npy')
+    return grid_path, pos_path
+
+
+def _load_roma_scanrefer(data_path, data_split, opt):
+    data_root = _data_root(opt, data_path)
+    split_tag = _split_tag(data_split)
+    grid_path, _ = _pc_paths(opt, data_root, split_tag)
+    images = np.load(grid_path)
+    captions = []
+    with open(osp.join(data_root, f'scanrefer_{split_tag}.jsonl'), 'r', encoding='utf-8') as f:
+        for line in f:
+            captions.append(json.loads(line)['description'])
+    return captions, images, 10
+
 
 class PrecompRegionDataset(data.Dataset):
     """
@@ -26,28 +67,33 @@ class PrecompRegionDataset(data.Dataset):
         self.data_path = data_path
         self.data_name = data_name
 
-        loc_cap = os.path.join(data_path,"precomp")
-        loc_image = os.path.join(data_path,"precomp")
-        
-        # Captions
-        self.captions = []
-        with open(osp.join(loc_cap, '%s_caps.txt' % data_split), 'r') as f:
-            for line in f:
-                self.captions.append(line.strip())
-        # Image features
-        self.images = np.load(os.path.join(loc_image, '%s_ims.npy' % data_split))
+        if data_name == 'scanrefer':
+            self.captions, self.images, self.im_div = _load_roma_scanrefer(data_path, data_split, opt)
+        else:
+            loc_cap = os.path.join(data_path,"precomp")
+            loc_image = os.path.join(data_path,"precomp")
+
+            # Captions
+            self.captions = []
+            with open(osp.join(loc_cap, '%s_caps.txt' % data_split), 'r') as f:
+                for line in f:
+                    self.captions.append(line.strip())
+            # Image features
+            self.images = np.load(os.path.join(loc_image, '%s_ims.npy' % data_split))
 
 
         self.length = len(self.captions)
         # rkiros data has redundancy in images, we divide by 5, 10crop doesn't
         num_images = len(self.images)
 
-        if num_images != self.length:
+        if data_name == 'scanrefer':
+            pass
+        elif num_images != self.length:
             self.im_div = 5
         else:
             self.im_div = 1
         # the development set for coco is large and so validation would be slow
-        if data_split == 'dev':
+        if data_name != 'scanrefer' and data_split == 'dev':
             self.length = 5000
 
         if hasattr(opt,"obj_drop_rate"):

@@ -4,10 +4,8 @@ import torch.utils.data as data
 import os
 import os.path as osp
 import numpy as np
-from imageio import imread
 import random
 import json
-import cv2
 
 import logging
 

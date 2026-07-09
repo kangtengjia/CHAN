@@ -4,6 +4,8 @@ def get_argument_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', default='./data/',
                         help='path to datasets')
+    parser.add_argument('--data_root', default='',
+                        help='Root directory for RoMa-preprocessed 3D scene-text files.')
     parser.add_argument('--data_name', default='precomp',
                         help='{coco,f30k}_precomp')
     parser.add_argument('--vocab_path', default='./vocab/',
@@ -64,6 +66,18 @@ def get_argument_parser():
                         help='Whether Abandoning features')
     parser.add_argument('--obj_drop_rate', type=float, default=0.2,
                         help='probability of droping objects.')
+    parser.add_argument('--pc_variant', default='base',
+                        help='RoMa point-cloud feature variant: base|base_plus_uni3dinst.')
+    parser.add_argument('--uni3d_inst_k', default=20, type=int,
+                        help='Number of Uni3D instance proposals when pc_variant=base_plus_uni3dinst.')
+    parser.add_argument('--pc_grid_train', default='',
+                        help='Optional override for train point-cloud feature npy.')
+    parser.add_argument('--pc_grid_val', default='',
+                        help='Optional override for val point-cloud feature npy.')
+    parser.add_argument('--pc_pos_train', default='',
+                        help='Optional override for train point-cloud position npy.')
+    parser.add_argument('--pc_pos_val', default='',
+                        help='Optional override for val point-cloud position npy.')
     parser.add_argument('--criterion', default="ContrastiveLoss", type=str,
                         help='ContrastiveLoss|InfoNCELoss.')
     parser.add_argument('--margin', default=0.2, type=float,

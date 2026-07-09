@@ -13,7 +13,7 @@ logger.setLevel(logging.INFO)
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', default='coco',
-                        help='coco or f30k')
+                        help='coco, f30k, or scanrefer')
     parser.add_argument('--model_path', default='/tmp/data/coco')
     parser.add_argument('--data_path', default='runs/f30k_butd_region_bigru/model_best.pth')
     parser.add_argument('--save_results', action='store_true')
@@ -40,7 +40,7 @@ def main():
         else:
             # Evaluate COCO-trained models on CxC
             evaluation.evalrank(opt.model_path, data_path=opt.data_path, split='testall', fold5=True, cxc=True)
-    elif opt.dataset == 'f30k':
+    elif opt.dataset in {'f30k', 'scanrefer'}:
         # Evaluate Flickr30K
         evaluation.evalrank(opt.model_path, data_path=opt.data_path, split='test', fold5=False, save_path=save_path)
 

@@ -25,7 +25,7 @@ class Model(object):
         self.txt_enc = get_text_encoder(opt.vocab_size, opt.embed_size, opt.word_dim, opt.num_layers,
                                          text_enc_type=opt.text_enc_type, use_bi_gru=True, 
                                          no_txtnorm=opt.no_txtnorm, wemb_type=opt.wemb_type,
-                                         word2idx=opt.word2idx)
+                                         word2idx=opt.word2idx, bert_path=getattr(opt, 'bert_path', None))
         self.sim_enc = SimsEncoder(coding_type=opt.coding_type, pooling_type=opt.pooling_type, opt=opt)
 
         # Loss and Optimizer
@@ -180,4 +180,3 @@ class Model(object):
         if self.grad_clip > 0:
             clip_grad_norm_(self.params, self.grad_clip)
         self.optimizer.step()
-

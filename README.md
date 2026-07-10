@@ -84,6 +84,43 @@ sh scripts/train.sh
 sh scripts/eval.sh
 ```
 
+## RoMa Text-to-3D Adaptation
+
+The RoMa comparison path applies the original CHAN matcher to the shared 1024-D DGCNN patch features. It supports SceneDepict-3D2T, ScanRefer, Nr3D, and LLM-3D-Scene with both Bi-GRU and BERT.
+
+Validate all required data and the local BERT checkpoint:
+
+```bash
+DATA_ROOT=/home/ktj/Projects/Cross-Modality-Learning/RoMa/data \
+BERT_PATH=/home/ktj/Projects/RoMa/pretrained/bert-base-uncased \
+bash scripts/preflight_roma.sh
+```
+
+Train one configuration:
+
+```bash
+GPU_ID=0 bash scripts/train_roma.sh scanrefer bigru
+GPU_ID=1 BERT_PATH=/home/ktj/Projects/RoMa/pretrained/bert-base-uncased \
+  bash scripts/train_roma.sh scanrefer bert
+```
+
+Train the full four-dataset × two-encoder matrix:
+
+```bash
+bash scripts/run_roma_matrix.sh
+```
+
+Evaluate a checkpoint with unified text-to-scene `R@1/R@5/R@10/R@30` metrics:
+
+```bash
+python eval_roma.py \
+  --model_path checkpoints/roma/scanrefer/bigru/model_best.pth \
+  --data_root /home/ktj/Projects/Cross-Modality-Learning/RoMa/data \
+  --output_json checkpoints/roma/scanrefer/bigru/metrics.json
+```
+
+Set `AUTO_RESUME=1` to resume a current-format checkpoint. Legacy checkpoints intentionally require weights-only loading and are not suitable for continued fair-comparison training.
+
 ## Reference
 
 If you found this code useful, please cite the following paper:
@@ -95,4 +132,3 @@ If you found this code useful, please cite the following paper:
     year={2023}
 } 
 ```
-

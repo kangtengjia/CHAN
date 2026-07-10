@@ -21,7 +21,7 @@ def get_text_encoder(vocab_size, embed_size, word_dim, num_layers, text_enc_type
     if text_enc_type == "bigru":
         txt_enc = EncoderTextBigru(vocab_size, embed_size, word_dim, num_layers, use_bi_gru=use_bi_gru, no_txtnorm=no_txtnorm, **args)
     elif text_enc_type == "bert":
-        txt_enc = EncoderTextBert(embed_size, no_txtnorm=no_txtnorm)
+        txt_enc = EncoderTextBert(embed_size, no_txtnorm=no_txtnorm, bert_path=args.get("bert_path"))
     else:
         raise ValueError("Unknown precomp_enc_type: {}".format(text_enc_type))
     return txt_enc
@@ -143,14 +143,13 @@ class EncoderTextBigru(nn.Module):
 
 # Language Model with BERT
 class EncoderTextBert(nn.Module):
-    def __init__(self, embed_size, no_txtnorm=False):
+    def __init__(self, embed_size, no_txtnorm=False, bert_path=None):
         super(EncoderTextBert, self).__init__()
         self.embed_size = embed_size
         self.no_txtnorm = no_txtnorm
 
         # self.bert = BertModel.from_pretrained('bert-base-uncased')
-        root = os.path.expanduser("~/.cache/torch/hub/transformers")
-        self.bert = BertModel.from_pretrained(config=root,pretrained_model_name_or_path=root)
+        self.bert = BertModel.from_pretrained(str(bert_path), local_files_only=True)
         
         self.linear = nn.Linear(768, embed_size)
 

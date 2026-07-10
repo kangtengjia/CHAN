@@ -4,6 +4,8 @@ import logging
 from plistlib import InvalidFileException
 from lib import evaluation
 from lib.modules import set_seeds
+from lib.datasets.roma import canonical_dataset_name
+from eval_roma import evaluate as evaluate_roma
 
 logging.basicConfig()
 logger = logging.getLogger()
@@ -40,8 +42,10 @@ def main():
         else:
             # Evaluate COCO-trained models on CxC
             evaluation.evalrank(opt.model_path, data_path=opt.data_path, split='testall', fold5=True, cxc=True)
-    elif opt.dataset in {'f30k', 'scanrefer'}:
-        # Evaluate Flickr30K
+    elif canonical_dataset_name(opt.dataset) in {'scenedepict', 'scanrefer', 'nr3d', '3dllm'}:
+        result = evaluate_roma(opt.model_path, opt.data_path)
+        logger.info("RoMa metrics: %s", result["metrics"])
+    elif opt.dataset == 'f30k':
         evaluation.evalrank(opt.model_path, data_path=opt.data_path, split='test', fold5=False, save_path=save_path)
 
 

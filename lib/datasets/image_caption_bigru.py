@@ -10,11 +10,9 @@ import nltk
 
 import logging
 
+from .roma import SceneUniqueBatchSampler, canonical_dataset_name, load_roma_bundle
+
 logger = logging.getLogger(__name__)
-
-
-def _split_tag(data_split):
-    return 'train' if data_split == 'train' else 'val'
 
 
 def _data_root(opt, data_path):
@@ -43,16 +41,18 @@ def _pc_paths(opt, data_root, split_tag):
     return grid_path, pos_path
 
 
-def _load_roma_scanrefer(data_path, data_split, opt):
+def _load_roma(data_path, data_name, data_split, opt):
     data_root = _data_root(opt, data_path)
-    split_tag = _split_tag(data_split)
+    split_tag = 'train' if data_split == 'train' else 'val'
     grid_path, _ = _pc_paths(opt, data_root, split_tag)
-    images = np.load(grid_path)
-    captions = []
-    with open(osp.join(data_root, f'scanrefer_{split_tag}.jsonl'), 'r', encoding='utf-8') as f:
-        for line in f:
-            captions.append(json.loads(line)['description'])
-    return captions, images, 10
+    return load_roma_bundle(
+        data_root,
+        data_name,
+        data_split,
+        pc_variant=getattr(opt, 'pc_variant', 'base'),
+        uni3d_inst_k=getattr(opt, 'uni3d_inst_k', 20),
+        feature_path=grid_path if canonical_dataset_name(data_name) == 'scanrefer' else None,
+    )
 
 
 class PrecompRegionDataset(data.Dataset):
@@ -67,8 +67,15 @@ class PrecompRegionDataset(data.Dataset):
         self.data_path = data_path
         self.data_name = data_name
 
-        if data_name == 'scanrefer':
-            self.captions, self.images, self.im_div = _load_roma_scanrefer(data_path, data_split, opt)
+        self.is_roma = canonical_dataset_name(data_name) in {'scenedepict', 'scanrefer', 'nr3d', '3dllm'}
+        if self.is_roma:
+            bundle = _load_roma(data_path, data_name, data_split, opt)
+            self.captions = bundle.captions
+            self.images = bundle.features
+            self.scene_ids = bundle.scene_ids
+            self.scene_indices = bundle.scene_indices
+            self.feature_scene_ids = bundle.feature_scene_ids
+            self.im_div = None
         else:
             loc_cap = os.path.join(data_path,"precomp")
             loc_image = os.path.join(data_path,"precomp")
@@ -86,14 +93,14 @@ class PrecompRegionDataset(data.Dataset):
         # rkiros data has redundancy in images, we divide by 5, 10crop doesn't
         num_images = len(self.images)
 
-        if data_name == 'scanrefer':
+        if self.is_roma:
             pass
         elif num_images != self.length:
             self.im_div = 5
         else:
             self.im_div = 1
         # the development set for coco is large and so validation would be slow
-        if data_name != 'scanrefer' and data_split == 'dev':
+        if not self.is_roma and data_split == 'dev':
             self.length = 5000
 
         if hasattr(opt,"obj_drop_rate"):
@@ -103,7 +110,7 @@ class PrecompRegionDataset(data.Dataset):
 
     def __getitem__(self, index):
         # handle the image redundancy
-        img_index = index // self.im_div
+        img_index = self.scene_indices[index] if self.is_roma else index // self.im_div
         caption = self.captions[index]
 
         # Convert caption (string) to word ids (with Size Augmentation at training time).
@@ -191,7 +198,7 @@ def collate_fn(data):
             end = lengths[i]
             targets[i, :end] = cap[:end]
 
-        return all_images, img_lengths, targets, lengths, ids
+        return all_images, img_lengths, targets, lengths, ids, img_ids
     else:  # raw input image
         # Merge images
         images = torch.stack(images, 0)
@@ -201,7 +208,7 @@ def collate_fn(data):
         for i, cap in enumerate(captions):
             end = lengths[i]
             targets[i, :end] = cap[:end]
-        return images, targets, lengths, ids
+        return images, targets, lengths, ids, img_ids
 
 
 def get_loader(data_path, data_name, data_split, vocab, opt, batch_size=100,
@@ -213,13 +220,29 @@ def get_loader(data_path, data_name, data_split, vocab, opt, batch_size=100,
         drop_last = False
     if opt.precomp_enc_type in ["basic","selfattention","transformer"]:
         dset = PrecompRegionDataset(data_path, data_name, data_split, vocab, opt, train)
-        data_loader = torch.utils.data.DataLoader(dataset=dset,
-                                                  batch_size=batch_size,
-                                                  shuffle=shuffle,
-                                                  pin_memory=True,
-                                                  collate_fn=collate_fn,
-                                                  num_workers=num_workers,
-                                                  drop_last=drop_last)
+        if dset.is_roma and data_split == 'train':
+            batch_sampler = SceneUniqueBatchSampler(
+                dset.scene_indices,
+                batch_size,
+                shuffle=shuffle,
+                drop_last=False,
+                seed=getattr(opt, 'seed', 2022),
+            )
+            data_loader = torch.utils.data.DataLoader(
+                dataset=dset,
+                batch_sampler=batch_sampler,
+                pin_memory=True,
+                collate_fn=collate_fn,
+                num_workers=num_workers,
+            )
+        else:
+            data_loader = torch.utils.data.DataLoader(dataset=dset,
+                                                      batch_size=batch_size,
+                                                      shuffle=shuffle,
+                                                      pin_memory=True,
+                                                      collate_fn=collate_fn,
+                                                      num_workers=num_workers,
+                                                      drop_last=drop_last)
     else:
         raise ValueError("Unknown precomp_enc_type: {}".format(opt.precomp_enc_type))
     return data_loader

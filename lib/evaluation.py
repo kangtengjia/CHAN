@@ -76,7 +76,7 @@ class LogCollector(object):
             tb_logger.log_value(prefix + k, v.val, step=step)
 
 
-def encode_data(model, data_loader, log_step=10, logging=logger.info):
+def encode_data(model, data_loader, log_step=10, logging=logger.info, return_scene_indices=False):
     """Encode all images and captions loadable by `data_loader`
     """
     batch_time = AverageMeter()
@@ -92,12 +92,13 @@ def encode_data(model, data_loader, log_step=10, logging=logger.info):
     cap_embs = None
 
     max_n_word = 0
-    for i, (images, image_lengths, captions, lengths, ids) in enumerate(data_loader):
+    for i, batch in enumerate(data_loader):
+        images, image_lengths, captions, lengths, ids = batch[:5]
         max_n_word = max(max_n_word, max(lengths))
 
     for i, data_i in enumerate(data_loader):
         # make sure val logger is used
-        images, image_lengths, captions, lengths, ids = data_i
+        images, image_lengths, captions, lengths, ids = data_i[:5]
         model.logger = val_logger
 
         # compute the embeddings
@@ -136,6 +137,8 @@ def encode_data(model, data_loader, log_step=10, logging=logger.info):
                 i, len(data_loader.dataset) // data_loader.batch_size + 1, batch_time=batch_time,
                 e_log=str(model.logger)))
         del images, captions
+    if return_scene_indices:
+        return img_embs, cap_embs, img_lens, cap_lens, list(data_loader.dataset.scene_indices)
     return img_embs, cap_embs, img_lens, cap_lens
 
 

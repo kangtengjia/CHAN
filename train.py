@@ -1,7 +1,7 @@
 """Training script"""
 import os
 import time
-from tkinter.messagebox import NO
+import json
 import numpy as np
 import torch
 from transformers import BertTokenizer
@@ -11,6 +11,11 @@ from lib.vocab import deserialize_vocab
 from lib.datasets import image_caption_bigru,image_caption_bert
 from lib.model import Model
 from lib.evaluation import i2t, t2i, AverageMeter, LogCollector, encode_data, compute_sims
+from lib.checkpointing import build_checkpoint, restore_checkpoint
+from lib.roma_config import require_bert_path, vocab_filename
+from lib.roma_evaluation import DEFAULT_KS, text_to_scene_metrics
+from lib.datasets.roma import canonical_dataset_name, source_paths
+from lib.manifest import build_run_manifest
 
 import logging
 import tensorboard_logger as tb_logger
@@ -30,15 +35,12 @@ def main():
 
     logger = logging.getLogger(__name__)
     logger.info(opt)
+    with open(os.path.join(opt.model_name, 'config.json'), 'w', encoding='utf-8') as handle:
+        json.dump(vars(opt), handle, indent=2, default=str)
 
     # Load Vocabulary
     if opt.text_enc_type=="bigru":
-        if opt.data_name == 'scanrefer':
-            vocab_file = 'my_data_vocab.json'
-        elif 'coco' in opt.data_name:
-            vocab_file = 'coco_precomp_vocab.json'
-        else:
-            vocab_file = 'f30k_precomp_vocab.json'
+        vocab_file = vocab_filename(opt.data_name)
         vocab = deserialize_vocab(os.path.join(opt.vocab_path, vocab_file))
         vocab.add_word('<mask>')  # add the mask, for testing cloze
         logger.info('Add <mask> token into the vocab')
@@ -57,9 +59,8 @@ def main():
 
         # Load Tokenizer and Vocabulary
         # tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        root = os.path.expanduser("~/.cache/torch/hub/transformers")
-
-        tokenizer = BertTokenizer.from_pretrained(pretrained_model_name_or_path=root)
+        opt.bert_path = str(require_bert_path(opt.bert_path))
+        tokenizer = BertTokenizer.from_pretrained(opt.bert_path, local_files_only=True)
         vocab = tokenizer.vocab
         opt.vocab_size = len(vocab)
         train_loader, val_loader = image_caption_bert.get_loaders(
@@ -68,24 +69,30 @@ def main():
         raise ValueError("Unknown text_enc_type: {}".format(opt.text_enc_type))
 
     model = Model(opt)
+    input_manifest = {}
+    if canonical_dataset_name(opt.data_name) in {'scenedepict', 'scanrefer', 'nr3d', '3dllm'}:
+        manifest_paths = source_paths(opt.data_root or opt.data_path, opt.data_name, 'train')
+        manifest_paths += source_paths(opt.data_root or opt.data_path, opt.data_name, 'val')
+        input_manifest = build_run_manifest(dict.fromkeys(manifest_paths), repo_root=os.path.dirname(__file__))
 
     lr_schedules = [opt.lr_update, ]
 
     # optionally resume from a checkpoint
     start_epoch = 0
+    best_score = 0.0
+    best_metrics = {}
     if opt.resume:
         if os.path.isfile(opt.resume):
             logger.info("=> loading checkpoint '{}'".format(opt.resume))
-            checkpoint = torch.load(opt.resume)
-            start_epoch = checkpoint['epoch']
-            best_rsum = checkpoint['best_rsum']
-
+            checkpoint = torch.load(opt.resume, map_location='cpu')
             model.load_state_dict(checkpoint['model'])
-            # Eiters is used to show logs as the continuation of another training
-            model.Eiters = checkpoint['Eiters']
-            logger.info("=> loaded checkpoint '{}' (epoch {}, best_rsum {})"
-                        .format(opt.resume, start_epoch, best_rsum))
-            # validate(opt, val_loader, model)
+            resume_state = restore_checkpoint(checkpoint, model.optimizer, weights_only=opt.weights_only)
+            start_epoch = resume_state.epoch
+            best_score = resume_state.best_score
+            best_metrics = resume_state.best_metrics
+            model.Eiters = resume_state.iterations
+            logger.info("=> loaded checkpoint '{}' (epoch {}, best score {})"
+                        .format(opt.resume, start_epoch, best_score))
             if opt.reset_start_epoch:
                 start_epoch = 0
         else:
@@ -93,7 +100,6 @@ def main():
 
 
     # Train the Model
-    best_rsum = 0
     for epoch in range(start_epoch, opt.num_epochs):
         logger.info(opt.logger_name)
         logger.info(opt.model_name)
@@ -108,21 +114,30 @@ def main():
         train(opt, train_loader, model, epoch, val_loader)
 
         # evaluate on validation set
-        rsum = validate(opt, val_loader, model)
+        metrics = validate(opt, val_loader, model)
+        score = metrics['Rsum']
 
         # remember best R@ sum and save checkpoint
-        is_best = rsum > best_rsum
-        best_rsum = max(rsum, best_rsum)
+        is_best = score > best_score
+        if is_best:
+            best_score = score
+            best_metrics = metrics
         if not os.path.exists(opt.model_name):
             os.mkdir(opt.model_name)
         if is_best:logger.info("Best model saving at epoch %d"%epoch)
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'model': model.state_dict(),
-            'best_rsum': best_rsum,
-            'opt': opt,
-            'Eiters': model.Eiters,
-        }, is_best, filename='checkpoint.pth'.format(epoch), prefix=opt.model_name + '/')
+        checkpoint = build_checkpoint(
+            epoch=epoch + 1,
+            model_state=model.state_dict(),
+            optimizer=model.optimizer,
+            best_score=best_score,
+            best_metrics=best_metrics,
+            iterations=model.Eiters,
+            config=vars(opt),
+            scheduler_state={'milestones': lr_schedules},
+            input_manifest=input_manifest,
+        )
+        checkpoint['opt'] = opt
+        save_checkpoint(checkpoint, is_best, filename='checkpoint.pth', prefix=opt.model_name + '/')
 
 
 def train(opt, train_loader, model, epoch, val_loader):
@@ -137,7 +152,8 @@ def train(opt, train_loader, model, epoch, val_loader):
         logger.info('txt encoder trainable parameters: {}'.format(count_params(model.txt_enc)))
         logger.info('similarity encoder trainable parameters: {}'.format(count_params(model.sim_enc)))
 
-    num_loader_iter = len(train_loader.dataset) // train_loader.batch_size + 1
+    if hasattr(train_loader.batch_sampler, 'set_epoch'):
+        train_loader.batch_sampler.set_epoch(epoch)
 
     end = time.time()
     # opt.viz = True
@@ -152,7 +168,9 @@ def train(opt, train_loader, model, epoch, val_loader):
         model.logger = train_logger
 
         # Update the model
-        images, img_lengths, captions, lengths, _ = train_data
+        images, img_lengths, captions, lengths, _, scene_indices = train_data
+        if getattr(train_loader.dataset, 'is_roma', False) and len(scene_indices) != len(set(int(index) for index in scene_indices)):
+            raise RuntimeError('scene-unique sampler emitted duplicate scenes in one batch')
         model.train_emb(images, captions, lengths, image_lengths=img_lengths)
 
         # measure elapsed time
@@ -167,7 +185,7 @@ def train(opt, train_loader, model, epoch, val_loader):
                 'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                 'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                     .format(
-                    epoch, i, len(train_loader.dataset) // train_loader.batch_size + 1, batch_time=batch_time,
+                    epoch, i, len(train_loader), batch_time=batch_time,
                     data_time=data_time, e_log=str(model.logger)))
 
         # Record logs in tensorboard
@@ -178,15 +196,28 @@ def train(opt, train_loader, model, epoch, val_loader):
         model.logger.tb_log(tb_logger, step=model.Eiters)
 
 
+def _encode_scene_features(model, features, batch_size):
+    encoded = []
+    lengths = []
+    device = next(model.img_enc.parameters()).device
+    for start in range(0, len(features), int(batch_size)):
+        batch = torch.as_tensor(features[start:start + int(batch_size)], dtype=torch.float32, device=device)
+        batch_lengths = torch.full((len(batch),), batch.size(1), dtype=torch.float32, device=device)
+        output = model.img_enc(batch, batch_lengths)
+        encoded.append(output.detach().cpu().numpy())
+        lengths.extend([batch.size(1)] * len(batch))
+    return np.concatenate(encoded, axis=0), lengths
+
+
 def validate(opt, val_loader, model):
     logger = logging.getLogger(__name__)
     model.val_start()
     with torch.no_grad():
         # compute the encoding for all the validation images and captions
-        img_embs, cap_embs, img_lens, cap_lens = encode_data(model, val_loader, opt.log_step, logging.info)
-
-    cap_per_scene = getattr(val_loader.dataset, 'im_div', 5)
-    img_embs = np.array([img_embs[i] for i in range(0, len(img_embs), cap_per_scene)])
+        _, cap_embs, _, cap_lens, caption_scene_indices = encode_data(
+            model, val_loader, opt.log_step, logging.info, return_scene_indices=True
+        )
+        img_embs, img_lens = _encode_scene_features(model, val_loader.dataset.images, opt.batch_size)
 
     start = time.time()
     # sims = compute_sim(img_embs, cap_embs)
@@ -195,35 +226,15 @@ def validate(opt, val_loader, model):
     end = time.time()
     logger.info("calculate similarity time:".format(end - start))
 
-    # caption retrieval
-    npts = img_embs.shape[0]
-    # (r1, r5, r10, medr, meanr) = i2t(img_embs, cap_embs, cap_lens, sims)
-    (r1, r5, r10, medr, meanr) = i2t(npts, sims)
-    logging.info("Image to text: %.1f, %.1f, %.1f, %.1f, %.1f" %
-                 (r1, r5, r10, medr, meanr))
-    # image retrieval
-    # (r1i, r5i, r10i, medri, meanr) = t2i(img_embs, cap_embs, cap_lens, sims)
-    (r1i, r5i, r10i, medri, meanr) = t2i(npts, sims)
-    logging.info("Text to image: %.1f, %.1f, %.1f, %.1f, %.1f" %
-                 (r1i, r5i, r10i, medri, meanr))
-    # sum of recalls to be used for early stopping
-    currscore = r1 + r5 + r10 + r1i + r5i + r10i
-    logger.info('Current rsum is {}'.format(currscore))
+    metrics = text_to_scene_metrics(sims.T, caption_scene_indices, ks=DEFAULT_KS)
+    logger.info('Text to scene: R@1 %.2f R@5 %.2f R@10 %.2f R@30 %.2f MedR %.1f MeanR %.1f Rsum %.2f',
+                metrics['R@1'], metrics['R@5'], metrics['R@10'], metrics['R@30'],
+                metrics['MedR'], metrics['MeanR'], metrics['Rsum'])
 
     # record metrics in tensorboard
-    tb_logger.log_value('r1', r1, step=model.Eiters)
-    tb_logger.log_value('r5', r5, step=model.Eiters)
-    tb_logger.log_value('r10', r10, step=model.Eiters)
-    tb_logger.log_value('medr', medr, step=model.Eiters)
-    tb_logger.log_value('meanr', meanr, step=model.Eiters)
-    tb_logger.log_value('r1i', r1i, step=model.Eiters)
-    tb_logger.log_value('r5i', r5i, step=model.Eiters)
-    tb_logger.log_value('r10i', r10i, step=model.Eiters)
-    tb_logger.log_value('medri', medri, step=model.Eiters)
-    tb_logger.log_value('meanr', meanr, step=model.Eiters)
-    tb_logger.log_value('rsum', currscore, step=model.Eiters)
-
-    return currscore
+    for key in ['R@1', 'R@5', 'R@10', 'R@30', 'MedR', 'MeanR', 'Rsum']:
+        tb_logger.log_value(key.replace('@', ''), metrics[key], step=model.Eiters)
+    return metrics
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth', prefix=''):
     logger = logging.getLogger(__name__)

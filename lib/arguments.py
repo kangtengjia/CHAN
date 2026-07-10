@@ -10,6 +10,10 @@ def get_argument_parser():
                         help='{coco,f30k}_precomp')
     parser.add_argument('--vocab_path', default='./vocab/',
                         help='Path to saved vocabulary json files.')
+    parser.add_argument('--bert_path', default='',
+                        help='Local bert-base-uncased directory for BERT runs.')
+    parser.add_argument('--weights_only', action='store_true',
+                        help='Load model weights from a legacy checkpoint without resuming optimizer state.')
     parser.add_argument('--num_epochs', default=30, type=int,
                         help='Number of training epochs.')
     parser.add_argument('--batch_size', default=128, type=int,

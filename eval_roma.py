@@ -38,7 +38,7 @@ def build_loader(opt):
 
 
 def evaluate(model_path: str, data_root: str, output_json: str | None = None) -> dict:
-    checkpoint = torch.load(model_path, map_location="cpu")
+    checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
     opt = checkpoint["opt"]
     opt.data_path = data_root
     opt.data_root = data_root

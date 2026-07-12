@@ -21,9 +21,11 @@ def test_markdown_metrics_reports_unified_four_recalls():
     table = format_markdown_metrics(
         "scanrefer",
         "bigru",
-        {"R@1": 1.0, "R@5": 2.0, "R@10": 3.0, "R@30": 4.0, "Rsum": 10.0, "MedR": 20.0, "MeanR": 30.0},
+        {"R@1": 1.0, "R@5": 2.0, "R@10": 3.0, "R@30": 4.0, "Rsum": 10.0, "MedR": 20.0, "MeanR": 30.0, "MRR": 40.0},
     )
 
     assert "R@1" in table
     assert "R@30" in table
     assert "10.00" in table
+    assert "MRR" in table
+    assert "40.00" in table

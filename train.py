@@ -227,12 +227,12 @@ def validate(opt, val_loader, model):
     logger.info("calculate similarity time:".format(end - start))
 
     metrics = text_to_scene_metrics(sims.T, caption_scene_indices, ks=DEFAULT_KS)
-    logger.info('Text to scene: R@1 %.2f R@5 %.2f R@10 %.2f R@30 %.2f MedR %.1f MeanR %.1f Rsum %.2f',
+    logger.info('Text to scene: R@1 %.2f R@5 %.2f R@10 %.2f R@30 %.2f MedR %.1f MeanR %.1f MRR %.2f Rsum %.2f',
                 metrics['R@1'], metrics['R@5'], metrics['R@10'], metrics['R@30'],
-                metrics['MedR'], metrics['MeanR'], metrics['Rsum'])
+                metrics['MedR'], metrics['MeanR'], metrics['MRR'], metrics['Rsum'])
 
     # record metrics in tensorboard
-    for key in ['R@1', 'R@5', 'R@10', 'R@30', 'MedR', 'MeanR', 'Rsum']:
+    for key in ['R@1', 'R@5', 'R@10', 'R@30', 'MedR', 'MeanR', 'MRR', 'Rsum']:
         tb_logger.log_value(key.replace('@', ''), metrics[key], step=model.Eiters)
     return metrics
 

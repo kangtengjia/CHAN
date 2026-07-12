@@ -26,10 +26,10 @@ RUN_PRESETS = {
 
 
 def format_markdown_metrics(dataset: str, text_encoder: str, metrics: Mapping[str, float]) -> str:
-    headers = ["Dataset", "Text", "R@1", "R@5", "R@10", "R@30", "Rsum", "MedR", "MeanR"]
+    headers = ["Dataset", "Text", "R@1", "R@5", "R@10", "R@30", "Rsum", "MedR", "MeanR", "MRR"]
     values = [
         dataset,
         text_encoder,
-        *(f"{float(metrics[key]):.2f}" for key in ["R@1", "R@5", "R@10", "R@30", "Rsum", "MedR", "MeanR"]),
+        *(f"{float(metrics[key]):.2f}" for key in ["R@1", "R@5", "R@10", "R@30", "Rsum", "MedR", "MeanR", "MRR"]),
     ]
     return "| " + " | ".join(headers) + " |\n| " + " | ".join(["---"] * len(headers)) + " |\n| " + " | ".join(values) + " |\n"

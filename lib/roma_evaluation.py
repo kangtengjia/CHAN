@@ -66,4 +66,5 @@ def text_to_scene_metrics(
     metrics["Rsum"] = recall_sum
     metrics["MedR"] = float(statistics.median(ranks)) if ranks else 0.0
     metrics["MeanR"] = float(np.mean(ranks)) if ranks else 0.0
+    metrics["MRR"] = 100.0 * float(np.mean([1.0 / rank for rank in ranks])) if ranks else 0.0
     return metrics

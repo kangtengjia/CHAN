@@ -84,7 +84,7 @@ def main():
     if opt.resume:
         if os.path.isfile(opt.resume):
             logger.info("=> loading checkpoint '{}'".format(opt.resume))
-            checkpoint = torch.load(opt.resume, map_location='cpu')
+            checkpoint = torch.load(opt.resume, map_location='cpu', weights_only=False)
             model.load_state_dict(checkpoint['model'])
             resume_state = restore_checkpoint(checkpoint, model.optimizer, weights_only=opt.weights_only)
             start_epoch = resume_state.epoch

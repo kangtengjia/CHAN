@@ -52,7 +52,9 @@ def evaluate(model_path: str, data_root: str, output_json: str | None = None) ->
             model, loader, return_scene_indices=True
         )
         img_embs, img_lens = _encode_scene_features(model, loader.dataset.images, opt.batch_size)
-        sims = compute_sims(img_embs, cap_embs, img_lens, cap_lens, model)
+        # A 128x128 cross-attention shard can exceed 24 GB for 200-region RoMa
+        # scenes. Smaller shards compute identical scores with bounded memory.
+        sims = compute_sims(img_embs, cap_embs, img_lens, cap_lens, model, shard_size=32)
     metrics = text_to_scene_metrics(sims.T, caption_scene_indices, ks=DEFAULT_KS)
     result = {
         "dataset": opt.data_name,
